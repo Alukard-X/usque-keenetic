@@ -4,48 +4,44 @@
 # Usque Auto-Installer for Keenetic Entware
 # ==========================================
 
-# Цвета для вывода (если поддерживаются)
 GREEN='\033[0;32m'
 RED='\033[0;31m'
 NC='\033[0m'
 
 echo "Начинаю установку Usque..."
 
-# 1. Устанавливаем переменные окружения (SSL сертификаты)
+# 1. Устанавливаем переменные окружения
 export SSL_CERT_FILE=/opt/etc/ssl/certs/ca-certificates.crt
 export HTTPLIB_CA_CERTS=/opt/etc/ssl/certs/ca-certificates.crt
 
-# Проверяем наличие необходимых утилит
+# Проверяем зависимости
 if ! opkg list-installed | grep -q "wget-ssl"; then
     echo "Установка зависимостей (wget-ssl, ca-certificates, unzip)..."
     opkg update > /dev/null
     opkg install wget-ssl ca-certificates unzip > /dev/null
 fi
 
-# 2. Определение архитектуры процессора
+# 2. Определение архитектуры
 ARCH=$(uname -m)
 echo "Обнаружена архитектура: $ARCH"
 
-# Маппинг архитектуры на название файла в релизах GitHub
-# Usque использует формат: usque-linux-<arch>
+# Маппинг архитектуры.
+# Примечание: Большинство Keenetic MIPS - это Little Endian (mipsle).
 case "$ARCH" in
-    mips)
-        # Keenetic обычно использует Little Endian (mipsel), даже если uname -m показывает mips
-        # Но на всякий случай проверяем Endianness, хотя на Keenetic это почти всегда mipsle
-        if [ "$(echo -n I | hexdump -o | awk '{ print $2; exit}')" = "1" ]; then
-            FILE_ARCH="mipsle"
+    mips|mipsel)
+        # Проверка Endianness (Keenetic обычно Little Endian)
+        # Если байт 0x49 ('I') идет первым в little-endian представлении
+        if [ "$(echo -n I | hexdump -o | awk '{ print $2; exit}')" = "0049" ] || [ "$ARCH" = "mipsel" ]; then
+             FILE_ARCH="mipsle"
         else
-            FILE_ARCH="mips"
+             FILE_ARCH="mips"
         fi
-        ;;
-    mipsel)
-        FILE_ARCH="mipsle"
         ;;
     aarch64)
         FILE_ARCH="arm64"
         ;;
     armv7l|armv6l)
-        FILE_ARCH="arm"
+        FILE_ARCH="armv7"
         ;;
     x86_64)
         FILE_ARCH="amd64"
@@ -56,17 +52,19 @@ case "$ARCH" in
         ;;
 esac
 
-echo "Целевая сборка: linux-$FILE_ARCH"
+echo "Целевая сборка: linux_$FILE_ARCH"
 
 # 3. Получение ссылки на скачивание
 REPO_API="https://api.github.com/repos/Diniboy1123/usque/releases/latest"
 echo "Получение информации о последнем релизе..."
 
-# Используем wget для парсинга JSON (grep/sed), чтобы не требовать jq
-DOWNLOAD_URL=$(wget -qO- "$REPO_API" | grep "browser_download_url" | grep "linux-$FILE_ARCH" | head -n 1 | sed 's/.*"\(http[^"]*\)".*/\1/')
+# Ищем ссылку, где содержится "linux_$FILE_ARCH" (например, linux_mipsle)
+# Используем sed для очистки кавычек
+DOWNLOAD_URL=$(wget -qO- "$REPO_API" | grep "browser_download_url" | grep "linux_${FILE_ARCH}" | head -n 1 | sed 's/.*"\(http[^"]*\)".*/\1/')
 
 if [ -z "$DOWNLOAD_URL" ]; then
     echo -e "${RED}Не удалось найти подходящий пакет для архитектуры $FILE_ARCH.${NC}"
+    echo "Проверьте список файлов в релизе вручную."
     exit 1
 fi
 
@@ -85,7 +83,7 @@ fi
 echo "Распаковка..."
 unzip -o $TMP_DIR/usque.zip -d $TMP_DIR > /dev/null
 
-# Поиск бинарника внутри архива (иногда он в папке, иногда лежит на верхнем уровне)
+# Поиск бинарника
 BINARY_FILE=$(find $TMP_DIR -name "usque" -type f | head -n 1)
 
 if [ -z "$BINARY_FILE" ]; then
@@ -98,20 +96,23 @@ mv "$BINARY_FILE" /opt/usr/bin/usque
 chmod +x /opt/usr/bin/usque
 echo "Исполняемый файл установлен в /opt/usr/bin/usque"
 
-# Очистка временных файлов
+# Очистка
 rm -rf $TMP_DIR
 
 # 6. Определение IP адреса роутера
-# Ищем IP интерфейса br0 (обычно локальная сеть), либо берем IP маршрута по умолчанию
+# Ищем IP интерфейса br0 (обычно локальная сеть Keenetic)
 LAN_IP=$(ip -4 addr show br0 | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
 if [ -z "$LAN_IP" ]; then
-    # Если br0 нет, пробуем получить IP интерфейса, смотрящего в дефолтный маршрут
-    LAN_IP=$(ip route get 1.1.1.1 | awk '{print $7; exit}')
+    # Если br0 нет, берем IP интерфейса, через который идет маршрут 0.0.0.0
+    IFACE=$(ip route | grep default | awk '{print $5}' | head -n 1)
+    if [ -n "$IFACE" ]; then
+        LAN_IP=$(ip -4 addr show "$IFACE" | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
+    fi
 fi
 
 if [ -z "$LAN_IP" ]; then
     echo -e "${RED}Не удалось автоматически определить IP адрес роутера. Укажите его вручную в /opt/etc/init.d/S99usque${NC}"
-    LAN_IP="192.168.1.1" # Значение по умолчанию
+    LAN_IP="192.168.1.1"
 fi
 
 echo "Определен IP адрес роутера: $LAN_IP"
@@ -214,7 +215,7 @@ chmod +x /opt/etc/init.d/S99usque
 
 # 8. Регистрация и запуск
 echo "Выполняю регистрацию (usque register)..."
-# Используем echo "y" для автоматического ответа 'y' на запрос лицензии
+# Автоматически отвечаем 'y' на вопрос лицензии
 echo "y" | /opt/usr/bin/usque register
 
 echo "Запуск сервиса..."
