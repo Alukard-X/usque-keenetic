@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin.sh
 
 # ==========================================
 # Usque Auto-Installer for Keenetic Entware
@@ -21,34 +21,41 @@ if ! opkg list-installed | grep -q "wget-ssl"; then
     opkg install wget-ssl ca-certificates unzip > /dev/null
 fi
 
-# 2. Определение архитектуры
-ARCH=$(uname -m)
-echo "Обнаружена архитектура: $ARCH"
+# 2. Определение архитектуры через opkg (Самый надежный способ для Keenetic)
+# opkg print-architecture выводит строки вида: arch mipsel-3.4 200
+# Мы берем второе слово из строки, содержащей arch
+OPKG_ARCH=$(opkg print-architecture | awk '/arch/ {print $2}' | head -n 1)
+echo "Архитектура Entware: $OPKG_ARCH"
 
-# Маппинг архитектуры.
-# Примечание: Большинство Keenetic MIPS - это Little Endian (mipsle).
-case "$ARCH" in
-    mips|mipsel)
-        # Проверка Endianness (Keenetic обычно Little Endian)
-        # Если байт 0x49 ('I') идет первым в little-endian представлении
-        if [ "$(echo -n I | hexdump -o | awk '{ print $2; exit}')" = "0049" ] || [ "$ARCH" = "mipsel" ]; then
-             FILE_ARCH="mipsle"
-        else
-             FILE_ARCH="mips"
-        fi
+case "$OPKG_ARCH" in
+    mipsel*)
+        # Keenetic Giga, Ultra, Extra и др. обычно попадают сюда
+        FILE_ARCH="mipsle"
         ;;
-    aarch64)
+    mips*)
+        # Редкие модели Big Endian
+        FILE_ARCH="mips"
+        ;;
+    aarch64*)
         FILE_ARCH="arm64"
         ;;
-    armv7l|armv6l)
+    arm*)
         FILE_ARCH="armv7"
         ;;
-    x86_64)
+    x86_64*)
         FILE_ARCH="amd64"
         ;;
     *)
-        echo -e "${RED}Ошибка: Архитектура $ARCH не поддерживается автоматически.${NC}"
-        exit 1
+        # Fallback через uname, если opkg дал странный результат
+        ARCH=$(uname -m)
+        echo "Попытка определения через uname: $ARCH"
+        case "$ARCH" in
+            mips|mipsel) FILE_ARCH="mipsle" ;; # Для Keenetic default mips = mipsle
+            aarch64) FILE_ARCH="arm64" ;;
+            armv7l|armv6l) FILE_ARCH="armv7" ;;
+            x86_64) FILE_ARCH="amd64" ;;
+            *) echo -e "${RED}Ошибка: Архитектура не определена.${NC}"; exit 1 ;;
+        esac
         ;;
 esac
 
@@ -58,13 +65,11 @@ echo "Целевая сборка: linux_$FILE_ARCH"
 REPO_API="https://api.github.com/repos/Diniboy1123/usque/releases/latest"
 echo "Получение информации о последнем релизе..."
 
-# Ищем ссылку, где содержится "linux_$FILE_ARCH" (например, linux_mipsle)
-# Используем sed для очистки кавычек
+# Ищем ссылку с названием "linux_{FILE_ARCH}"
 DOWNLOAD_URL=$(wget -qO- "$REPO_API" | grep "browser_download_url" | grep "linux_${FILE_ARCH}" | head -n 1 | sed 's/.*"\(http[^"]*\)".*/\1/')
 
 if [ -z "$DOWNLOAD_URL" ]; then
     echo -e "${RED}Не удалось найти подходящий пакет для архитектуры $FILE_ARCH.${NC}"
-    echo "Проверьте список файлов в релизе вручную."
     exit 1
 fi
 
@@ -100,18 +105,15 @@ echo "Исполняемый файл установлен в /opt/usr/bin/usque
 rm -rf $TMP_DIR
 
 # 6. Определение IP адреса роутера
-# Ищем IP интерфейса br0 (обычно локальная сеть Keenetic)
+# Сначала берем IP интерфейса br0 (мост LAN)
 LAN_IP=$(ip -4 addr show br0 | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
 if [ -z "$LAN_IP" ]; then
-    # Если br0 нет, берем IP интерфейса, через который идет маршрут 0.0.0.0
-    IFACE=$(ip route | grep default | awk '{print $5}' | head -n 1)
-    if [ -n "$IFACE" ]; then
-        LAN_IP=$(ip -4 addr show "$IFACE" | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
-    fi
+    # Если br0 нет, ищем интерфейс шлюза по умолчанию
+    LAN_IP=$(ip route get 1.1.1.1 | awk '{print $7; exit}')
 fi
 
 if [ -z "$LAN_IP" ]; then
-    echo -e "${RED}Не удалось автоматически определить IP адрес роутера. Укажите его вручную в /opt/etc/init.d/S99usque${NC}"
+    echo -e "${RED}Не удалось автоматически определить IP адрес роутера.${NC}"
     LAN_IP="192.168.1.1"
 fi
 
@@ -131,7 +133,6 @@ PIDFILE=/var/run/usque.pid
 
 # --- Logic ---
 
-# Check if disabled
 if [ "\$ENABLED" != "yes" ]; then
     echo "\$DESC is disabled."
     exit 0
@@ -139,7 +140,6 @@ fi
 
 start() {
     echo -n "Starting \$DESC: "
-    # 1. Check if already running
     if [ -f "\$PIDFILE" ]; then
         if kill -0 \$(cat "\$PIDFILE") 2>/dev/null; then
             echo "Already running."
@@ -147,16 +147,8 @@ start() {
         fi
     fi
     
-    # 2. Start the daemon
-    # -S: Start
-    # -b: Background (fork)
-    # -m: Make PID file
-    # -p: PID file path
-    # -x: Executable
-    # --: End of arguments for daemon runner
     start-stop-daemon -S -b -m -p "\$PIDFILE" -x "\$PROG" -- \$ARGS
     
-    # 3. Verify start
     sleep 1
     if [ -f "\$PIDFILE" ]; then
         echo "done."
@@ -167,9 +159,6 @@ start() {
 
 stop() {
     echo -n "Stopping \$DESC: "
-    # -K: Stop
-    # -p: PID file
-    # -x: Executable
     start-stop-daemon -K -p "\$PIDFILE" -x "\$PROG"
     rm -f "\$PIDFILE"
     echo "done."
@@ -191,23 +180,11 @@ status() {
 }
 
 case "\$1" in
-    start)
-        start
-        ;;
-    stop)
-        stop
-        ;;
-    restart)
-        stop
-        start
-        ;;
-    status)
-        status
-        ;;
-    *)
-        echo "Usage: \$0 {start|stop|restart|status}"
-        exit 1
-        ;;
+    start) start ;;
+    stop) stop ;;
+    restart) stop; start ;;
+    status) status ;;
+    *) echo "Usage: \$0 {start|stop|restart|status}"; exit 1 ;;
 esac
 EOF
 
@@ -215,7 +192,6 @@ chmod +x /opt/etc/init.d/S99usque
 
 # 8. Регистрация и запуск
 echo "Выполняю регистрацию (usque register)..."
-# Автоматически отвечаем 'y' на вопрос лицензии
 echo "y" | /opt/usr/bin/usque register
 
 echo "Запуск сервиса..."
