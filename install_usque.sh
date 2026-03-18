@@ -1,4 +1,4 @@
-#!/bin.sh
+#!/bin/sh
 
 # ==========================================
 # Usque Auto-Installer for Keenetic Entware
@@ -10,26 +10,46 @@ NC='\033[0m'
 
 echo "Начинаю установку Usque..."
 
-# 1. Устанавливаем переменные окружения
+# 1. Проверка и установка зависимостей
+# Список необходимых пакетов
+DEPS="wget-ssl ca-certificates unzip"
+NEED_UPDATE=0
+
+echo "Проверка зависимостей..."
+for pkg in $DEPS; do
+    # Проверяем, установлен ли пакет (opkg status возвращает пусто, если нет)
+    if [ -z "$(opkg status $pkg)" ]; then
+        echo "Пакет $pkg не найден. Требуется установка."
+        NEED_UPDATE=1
+    else
+        echo "Пакет $pkg уже установлен."
+    fi
+done
+
+if [ $NEED_UPDATE -eq 1 ]; then
+    echo "Обновление списков пакетов..."
+    opkg update > /dev/null
+    echo "Установка недостающих пакетов..."
+    opkg install $DEPS > /dev/null
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Ошибка при установке зависимостей.${NC}"
+        exit 1
+    fi
+    echo "Зависимости установлены."
+fi
+
+# Устанавливаем переменные окружения (делаем это после установки ca-certificates)
 export SSL_CERT_FILE=/opt/etc/ssl/certs/ca-certificates.crt
 export HTTPLIB_CA_CERTS=/opt/etc/ssl/certs/ca-certificates.crt
 
-# Проверяем зависимости
-if ! opkg list-installed | grep -q "wget-ssl"; then
-    echo "Установка зависимостей (wget-ssl, ca-certificates, unzip)..."
-    opkg update > /dev/null
-    opkg install wget-ssl ca-certificates unzip > /dev/null
-fi
-
 # 2. Определение архитектуры через opkg (Самый надежный способ для Keenetic)
 # opkg print-architecture выводит строки вида: arch mipsel-3.4 200
-# Мы берем второе слово из строки, содержащей arch
 OPKG_ARCH=$(opkg print-architecture | awk '/arch/ {print $2}' | head -n 1)
 echo "Архитектура Entware: $OPKG_ARCH"
 
 case "$OPKG_ARCH" in
     mipsel*)
-        # Keenetic Giga, Ultra, Extra и др. обычно попадают сюда
+        # Keenetic Giga, Ultra, Extra, Viva и др. обычно попадают сюда
         FILE_ARCH="mipsle"
         ;;
     mips*)
@@ -65,7 +85,7 @@ echo "Целевая сборка: linux_$FILE_ARCH"
 REPO_API="https://api.github.com/repos/Diniboy1123/usque/releases/latest"
 echo "Получение информации о последнем релизе..."
 
-# Ищем ссылку с названием "linux_{FILE_ARCH}"
+# Используем wget с сертификатами
 DOWNLOAD_URL=$(wget -qO- "$REPO_API" | grep "browser_download_url" | grep "linux_${FILE_ARCH}" | head -n 1 | sed 's/.*"\(http[^"]*\)".*/\1/')
 
 if [ -z "$DOWNLOAD_URL" ]; then
@@ -78,7 +98,9 @@ echo "Ссылка на скачивание: $DOWNLOAD_URL"
 # 4. Скачивание и распаковка
 TMP_DIR=/tmp/usque_install
 mkdir -p $TMP_DIR
-wget -q --show-progress -O $TMP_DIR/usque.zip "$DOWNLOAD_URL"
+
+echo "Скачивание..."
+wget --no-check-certificate -q --show-progress -O $TMP_DIR/usque.zip "$DOWNLOAD_URL"
 
 if [ $? -ne 0 ]; then
     echo -e "${RED}Ошибка при скачивании файла.${NC}"
@@ -88,7 +110,7 @@ fi
 echo "Распаковка..."
 unzip -o $TMP_DIR/usque.zip -d $TMP_DIR > /dev/null
 
-# Поиск бинарника
+# Поиск бинарника (игнорируем мусор, ищем файл 'usque')
 BINARY_FILE=$(find $TMP_DIR -name "usque" -type f | head -n 1)
 
 if [ -z "$BINARY_FILE" ]; then
@@ -101,19 +123,19 @@ mv "$BINARY_FILE" /opt/usr/bin/usque
 chmod +x /opt/usr/bin/usque
 echo "Исполняемый файл установлен в /opt/usr/bin/usque"
 
-# Очистка
+# Очистка временных файлов
 rm -rf $TMP_DIR
 
 # 6. Определение IP адреса роутера
-# Сначала берем IP интерфейса br0 (мост LAN)
+# Ищем IP интерфейса br0 (мост LAN), либо берем IP маршрута по умолчанию
 LAN_IP=$(ip -4 addr show br0 | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
 if [ -z "$LAN_IP" ]; then
-    # Если br0 нет, ищем интерфейс шлюза по умолчанию
+    # Если br0 нет, берем IP интерфейса, через который идет внешний маршрут
     LAN_IP=$(ip route get 1.1.1.1 | awk '{print $7; exit}')
 fi
 
 if [ -z "$LAN_IP" ]; then
-    echo -e "${RED}Не удалось автоматически определить IP адрес роутера.${NC}"
+    echo -e "${RED}Не удалось автоматически определить IP адрес роутера. Установлено значение по умолчанию 192.168.1.1${NC}"
     LAN_IP="192.168.1.1"
 fi
 
@@ -192,6 +214,7 @@ chmod +x /opt/etc/init.d/S99usque
 
 # 8. Регистрация и запуск
 echo "Выполняю регистрацию (usque register)..."
+# Автоматически отвечаем 'y' на вопрос лицензии
 echo "y" | /opt/usr/bin/usque register
 
 echo "Запуск сервиса..."
