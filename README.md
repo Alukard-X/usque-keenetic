@@ -27,8 +27,8 @@
 
 Подключитесь к роутеру по SSH и выполните следующую команду:
 
-```bash
 wget -qO- https://raw.githubusercontent.com/Alukard-X/usque-keenetic/refs/heads/main/install_usque.sh | sh
+
 ```
 
 *Примечание: Если вы еще не установили Entware, скрипт не сработает. Сначала установите Entware.*
