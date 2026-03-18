@@ -98,4 +98,3 @@ ARGS="socks -S -b 192.168.1.1 -p 8480 -d 1.1.1.1 -d 1.0.0.1 -s ozon.ru"
 ## Благодарности
 
 *   [Diniboy1123](https://github.com/Diniboy1123) за разработку [Usque](https://github.com/Diniboy1123/usque).
-```
