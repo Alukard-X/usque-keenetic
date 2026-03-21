@@ -25,6 +25,8 @@
 
 Подключитесь к роутеру по SSH и выполните следующую команду:
 
+opkg install wget-ssl ca-certificates
+
 wget -qO- https://raw.githubusercontent.com/Alukard-X/usque-keenetic/refs/heads/main/install_usque.sh | sh
 
 ```
