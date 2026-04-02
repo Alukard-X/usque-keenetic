@@ -61,6 +61,12 @@ opkg install wget-ssl ca-certificates
 wget -qO- https://raw.githubusercontent.com/Alukard-X/usque-keenetic/refs/heads/main/install_usque.sh | sh
 ```
 
+Если что-то пошло не так и не прошла автоматическая регистрация:
+```bash
+/opt/usr/bin/usque register
+/opt/etc/init.d/S99usque restart
+```
+
 После основной установки можно дополнительно настроить проксирование через **redsocks**:
 
 ```bash
