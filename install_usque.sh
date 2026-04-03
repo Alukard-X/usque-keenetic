@@ -11,13 +11,12 @@ NC='\033[0m'
 echo "Начинаю установку Usque..."
 
 # 1. Проверка и установка зависимостей
-# UPDATED: Added procps-ng (for pkill/pgrep) and bind-dig (for nslookup)
-DEPS="wget-ssl ca-certificates unzip procps-ng bind-dig"
+# УБРАН procps-ng, так как теперь используется встроенный start-stop-daemon
+DEPS="wget-ssl ca-certificates unzip bind-dig"
 NEED_UPDATE=0
 
 echo "Проверка зависимостей..."
 for pkg in $DEPS; do
-    # Проверяем, установлен ли пакет (opkg status возвращает пусто, если нет)
     if [ -z "$(opkg status $pkg 2>/dev/null | grep "Status:")" ]; then
         echo "Пакет $pkg не найден. Требуется установка."
         NEED_UPDATE=1
@@ -122,7 +121,7 @@ fi
 
 echo "Определен IP адрес роутера: $LAN_IP"
 
-# 7. Создание init скрипта
+# 7. Создание init скрипта (ИСПОЛЬЗУЕТСЯ start-stop-daemon)
 echo "Создание скрипта запуска /opt/etc/init.d/S99usque..."
 cat <<EOF > /opt/etc/init.d/S99usque
 #!/bin/sh
@@ -143,12 +142,13 @@ TARGET_DOMAIN="ozon.ru"
 # --- Logic ---
 
 is_running() {
-  pgrep -f "\$PROG" >/dev/null 2>&1
+  # Безопасная проверка: читаем PID, проверяем что он не пустой и процесс существует
+  [ -f "\$PIDFILE" ] && read pid < "\$PIDFILE" && [ -n "\$pid" ] && kill -0 "\$pid" 2>/dev/null
 }
 
 status_service() {
   if is_running; then
-    echo "\$DESC is running."
+    echo "\$DESC is running (PID \$(cat \$PIDFILE))."
   else
     echo "\$DESC is stopped."
   fi
@@ -204,7 +204,7 @@ wait_for_dns() {
 start() {
   if is_running; then
     echo "Cleaning up old processes..."
-    pkill -f "\$PROG"
+    stop
     sleep 1
   fi
 
@@ -221,18 +221,23 @@ start() {
   echo "Waiting 5 seconds for system stabilization..."
   sleep 5
   
-  cd /opt/usr/bin
-
   echo -n "Starting \$DESC: "
   
-  \$PROG \$ARGS >> /tmp/usque_startup.log 2>&1 &
-  local NEW_PID=\$!
+  # Используем start-stop-daemon для надежного запуска в фоне
+  start-stop-daemon --start --quiet \\
+    --pidfile "\$PIDFILE" \\
+    --exec "\$PROG" \\
+    --chdir /opt/usr/bin \\
+    --background \\
+    --make-pidfile \\
+    --stdout /tmp/usque_startup.log \\
+    --stderr /tmp/usque_startup.log \\
+    -- \$ARGS
   
   sleep 2
   
-  if kill -0 "\$NEW_PID" 2>/dev/null; then
-    echo "\$NEW_PID" > "\$PIDFILE"
-    echo "done. (PID \$NEW_PID)"
+  if is_running; then
+    echo "done. (PID \$(cat \$PIDFILE))"
     > /tmp/usque_startup.log
   else
     echo "failed."
@@ -243,7 +248,8 @@ start() {
 stop() {
   echo -n "Stopping \$DESC: "
   if is_running; then
-    pkill -f "\$PROG"
+    # --retry 5: шлет SIGTERM, ждет до 5 секунд, затем убивает SIGKILL
+    start-stop-daemon --stop --quiet --pidfile "\$PIDFILE" --exec "\$PROG" --retry 5
     echo "done."
   else
     echo "not running."
