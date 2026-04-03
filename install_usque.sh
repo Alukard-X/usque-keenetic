@@ -137,6 +137,7 @@ DESC="Usque SOCKS5"
 PIDFILE="/opt/var/run/usque.pid"
 BIND_IP="$LAN_IP"
 TARGET_DOMAIN="ozon.ru"
+REDSOCKS_INIT="/opt/etc/init.d/S23redsocks"
 
 # --- Logic ---
 
@@ -219,18 +220,10 @@ start() {
   echo "Waiting 5 seconds for system stabilization..."
   sleep 5
   
-  # BusyBox start-stop-daemon не поддерживает --chdir, поэтому переходим заранее
   cd /opt/usr/bin || return 1
 
   echo -n "Starting \$DESC: "
   
-  # Синтаксис BusyBox:
-  # -S : --start
-  # -b : --background
-  # -m : --make-pidfile
-  # -p : --pidfile
-  # -x : --exec
-  # Перенаправление вывода делаем стандартными средствами шелла
   start-stop-daemon -S -q -p "\$PIDFILE" -x "\$PROG" -b -m \
     >> /tmp/usque_startup.log 2>&1 -- \$ARGS
   
@@ -248,17 +241,14 @@ start() {
 stop() {
   echo -n "Stopping \$DESC: "
   if is_running; then
-    # Синтаксис BusyBox: -K это --stop
     start-stop-daemon -K -q -p "\$PIDFILE" -x "\$PROG"
     
-    # Ручная реализация --retry 5 (так как в BusyBox ее нет)
     local RETRY=5
     while [ \$RETRY -gt 0 ] && is_running; do
       sleep 1
       RETRY=\$((RETRY - 1))
     done
     
-    # Если после SIGTERM процесс жив - убиваем жестоко (SIGKILL)
     if is_running; then
       start-stop-daemon -K -q -p "\$PIDFILE" -x "\$PROG" -s KILL
     fi
@@ -274,7 +264,15 @@ case "\$1" in
   start) start ;;
   stop) stop ;;
   status) status_service ;;
-  restart) stop; start ;;
+  restart)
+    stop
+    start
+    # Перезапускаем redsocks, если он установлен, чтобы он подхватил новый SOCKS5 прокси
+    if [ -x "\$REDSOCKS_INIT" ]; then
+      echo "Detected Redsocks, restarting to apply new proxy..."
+      "\$REDSOCKS_INIT" restart
+    fi
+    ;;
   *) echo "Usage: \$0 {start|stop|restart|status}"; exit 1 ;;
 esac
 EOF
