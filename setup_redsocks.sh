@@ -92,6 +92,7 @@ base {
      *   generic    - some generic redirector that MAY work
      */
     redirector = iptables;
+    redsocks_conn_max = 4096; 
 }
 
 redsocks {
@@ -104,15 +105,15 @@ redsocks {
 
     // listen() queue length. Default value is SOMAXCONN and it should be
     // good enough for most of us.
-    // listenq = 128; // SOMAXCONN equals 128 on my Linux box.
+     listenq = 1024; // SOMAXCONN equals 128 on my Linux box.
 
     // `max_accept_backoff` is a delay to retry `accept()` after accept
     // failure (e.g. due to lack of file descriptors). It's measured in
     // milliseconds and maximal value is 65535. `min_accept_backoff` is
     // used as initial backoff value and as a damper for `accept() after
     // close()` logic.
-    // min_accept_backoff = 100;
-    // max_accept_backoff = 60000;
+     min_accept_backoff = 100;
+     max_accept_backoff = 60000;
 
     // `ip' and `port' are IP and tcp-port of proxy-server
     // You can also use hostname instead of IP, only one (random)
