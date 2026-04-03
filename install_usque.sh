@@ -285,14 +285,19 @@ echo "Выполняю регистрацию (usque register)..."
 if yes | /opt/usr/bin/usque register; then
     echo "Регистрация успешна."
 else
-    echo -e "${RED}Ошибка регистрации Usque. Проверьте логи выше.${NC}"
-    exit 1
+    echo -e "${RED}Ошибка при регистрации. Проверяю конфигурацию...${NC}"
 fi
 
-# Дополнительная проверка, что конфиг действительно создался
+# Дополнительная проверка, что конфиг на месте
 if [ ! -f "/opt/usr/bin/config.json" ]; then
-    echo -e "${RED}Ошибка: Файл конфигурации /opt/usr/bin/config.json не был создан.${NC}"
-    exit 1
+    echo "Файл /opt/usr/bin/config.json не найден. Проверяю наличие резервной копии..."
+    if [ -f "/opt/root/config.json" ]; then
+        cp "/opt/root/config.json" "/opt/usr/bin/config.json"
+        echo "Резервная копия применена успешно."
+    else
+        echo -e "${RED}Ошибка: Файл /opt/usr/bin/config.json отсутствует, а резервная копия /opt/root/config.json не найдена.${NC}"
+        exit 1
+    fi
 fi
 
 echo "Запуск сервиса..."
