@@ -11,14 +11,14 @@ NC='\033[0m'
 echo "Начинаю установку Usque..."
 
 # 1. Проверка и установка зависимостей
-# Список необходимых пакетов
-DEPS="wget-ssl ca-certificates unzip"
+# UPDATED: Added procps-ng (for pkill/pgrep) and bind-dig (for nslookup)
+DEPS="wget-ssl ca-certificates unzip procps-ng bind-dig"
 NEED_UPDATE=0
 
 echo "Проверка зависимостей..."
 for pkg in $DEPS; do
     # Проверяем, установлен ли пакет (opkg status возвращает пусто, если нет)
-    if [ -z "$(opkg status $pkg)" ]; then
+    if [ -z "$(opkg status $pkg 2>/dev/null | grep "Status:")" ]; then
         echo "Пакет $pkg не найден. Требуется установка."
         NEED_UPDATE=1
     else
@@ -38,39 +38,25 @@ if [ $NEED_UPDATE -eq 1 ]; then
     echo "Зависимости установлены."
 fi
 
-# Устанавливаем переменные окружения (делаем это после установки ca-certificates)
+# Устанавливаем переменные окружения
 export SSL_CERT_FILE=/opt/etc/ssl/certs/ca-certificates.crt
 export HTTPLIB_CA_CERTS=/opt/etc/ssl/certs/ca-certificates.crt
 
-# 2. Определение архитектуры через opkg (Самый надежный способ для Keenetic)
-# opkg print-architecture выводит строки вида: arch mipsel-3.4 200
+# 2. Определение архитектуры через opkg
 OPKG_ARCH=$(opkg print-architecture | awk '/arch/ {print $2}' | head -n 1)
 echo "Архитектура Entware: $OPKG_ARCH"
 
 case "$OPKG_ARCH" in
-    mipsel*)
-        # Keenetic Giga, Ultra, Extra, Viva и др. обычно попадают сюда
-        FILE_ARCH="mipsle"
-        ;;
-    mips*)
-        # Редкие модели Big Endian
-        FILE_ARCH="mips"
-        ;;
-    aarch64*)
-        FILE_ARCH="arm64"
-        ;;
-    arm*)
-        FILE_ARCH="armv7"
-        ;;
-    x86_64*)
-        FILE_ARCH="amd64"
-        ;;
+    mipsel*) FILE_ARCH="mipsle" ;;
+    mips*)   FILE_ARCH="mips" ;;
+    aarch64*) FILE_ARCH="arm64" ;;
+    arm*)    FILE_ARCH="armv7" ;;
+    x86_64*) FILE_ARCH="amd64" ;;
     *)
-        # Fallback через uname, если opkg дал странный результат
         ARCH=$(uname -m)
         echo "Попытка определения через uname: $ARCH"
         case "$ARCH" in
-            mips|mipsel) FILE_ARCH="mipsle" ;; # Для Keenetic default mips = mipsle
+            mips|mipsel) FILE_ARCH="mipsle" ;;
             aarch64) FILE_ARCH="arm64" ;;
             armv7l|armv6l) FILE_ARCH="armv7" ;;
             x86_64) FILE_ARCH="amd64" ;;
@@ -85,7 +71,6 @@ echo "Целевая сборка: linux_$FILE_ARCH"
 REPO_API="https://api.github.com/repos/Diniboy1123/usque/releases/latest"
 echo "Получение информации о последнем релизе..."
 
-# Используем wget с сертификатами
 DOWNLOAD_URL=$(wget -qO- "$REPO_API" | grep "browser_download_url" | grep "linux_${FILE_ARCH}" | head -n 1 | sed 's/.*"\(http[^"]*\)".*/\1/')
 
 if [ -z "$DOWNLOAD_URL" ]; then
@@ -110,7 +95,6 @@ fi
 echo "Распаковка..."
 unzip -o $TMP_DIR/usque.zip -d $TMP_DIR > /dev/null
 
-# Поиск бинарника (игнорируем мусор, ищем файл 'usque')
 BINARY_FILE=$(find $TMP_DIR -name "usque" -type f | head -n 1)
 
 if [ -z "$BINARY_FILE" ]; then
@@ -123,14 +107,11 @@ mv "$BINARY_FILE" /opt/usr/bin/usque
 chmod +x /opt/usr/bin/usque
 echo "Исполняемый файл установлен в /opt/usr/bin/usque"
 
-# Очистка временных файлов
 rm -rf $TMP_DIR
 
 # 6. Определение IP адреса роутера
-# Ищем IP интерфейса br0 (мост LAN), либо берем IP маршрута по умолчанию
 LAN_IP=$(ip -4 addr show br0 | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
 if [ -z "$LAN_IP" ]; then
-    # Если br0 нет, берем IP интерфейса, через который идет внешний маршрут
     LAN_IP=$(ip route get 1.1.1.1 | awk '{print $7; exit}')
 fi
 
@@ -141,7 +122,7 @@ fi
 
 echo "Определен IP адрес роутера: $LAN_IP"
 
-# 7. Создание init скрипта (UPDATED ROBUST VERSION)
+# 7. Создание init скрипта
 echo "Создание скрипта запуска /opt/etc/init.d/S99usque..."
 cat <<EOF > /opt/etc/init.d/S99usque
 #!/bin/sh
@@ -157,7 +138,6 @@ ARGS="socks -S -b $LAN_IP -p 8480 -d 1.1.1.1 -d 1.0.0.1 -s ozon.ru"
 DESC="Usque SOCKS5"
 PIDFILE="/opt/var/run/usque.pid"
 BIND_IP="$LAN_IP"
-# The domain you use in ARGS (needed for DNS check)
 TARGET_DOMAIN="ozon.ru"
 
 # --- Logic ---
@@ -204,13 +184,11 @@ wait_for_internet() {
   return 1
 }
 
-# Wait for DNS resolution (Critical for -s ozon.ru)
 wait_for_dns() {
   local RETRIES=30
   echo "Checking DNS resolution for \$TARGET_DOMAIN..."
   
   while [ \$RETRIES -gt 0 ]; do
-    # nslookup checks if the router can resolve the domain
     if nslookup "\$TARGET_DOMAIN" >/dev/null 2>&1; then
       echo "DNS ready."
       return 0
@@ -230,23 +208,16 @@ start() {
     sleep 1
   fi
 
-  # Step 1: Wait for Local Interface
   wait_for_ip
   
-  # Step 2: Wait for Config File
   if [ ! -f "\$CONFIG_FILE" ]; then
       echo "Error: Config missing."
       return 1
   fi
   
-  # Step 3: Wait for Internet Connection
   if ! wait_for_internet; then return 1; fi
-  
-  # Step 4: Wait for DNS (Crucial fix for -s domain args)
   if ! wait_for_dns; then return 1; fi
 
-  # Step 5: Stabilization delay
-  # Even after connectivity is up, routing tables might settle late.
   echo "Waiting 5 seconds for system stabilization..."
   sleep 5
   
@@ -293,7 +264,6 @@ chmod +x /opt/etc/init.d/S99usque
 
 # 8. Регистрация и запуск
 echo "Выполняю регистрацию (usque register)..."
-# Автоматически отвечаем 'y' на вопрос лицензии
 echo "y" | /opt/usr/bin/usque register
 
 echo "Запуск сервиса..."
