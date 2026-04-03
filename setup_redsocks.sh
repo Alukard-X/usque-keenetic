@@ -112,8 +112,8 @@ redsocks {
     // milliseconds and maximal value is 65535. `min_accept_backoff` is
     // used as initial backoff value and as a damper for `accept() after
     // close()` logic.
-     min_accept_backoff = 100;
-     max_accept_backoff = 60000;
+    // min_accept_backoff = 100;
+    // max_accept_backoff = 60000;
 
     // `ip' and `port' are IP and tcp-port of proxy-server
     // You can also use hostname instead of IP, only one (random)
