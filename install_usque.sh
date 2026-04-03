@@ -141,72 +141,151 @@ fi
 
 echo "Определен IP адрес роутера: $LAN_IP"
 
-# 7. Создание init скрипта
+# 7. Создание init скрипта (UPDATED ROBUST VERSION)
 echo "Создание скрипта запуска /opt/etc/init.d/S99usque..."
 cat <<EOF > /opt/etc/init.d/S99usque
 #!/bin/sh
 
 # --- Configuration ---
-ENABLED=yes
+PATH=/opt/sbin:/opt/bin:/opt/usr/sbin:/opt/usr/bin:/usr/sbin:/usr/bin:/sbin:/bin
+LD_LIBRARY_PATH=/lib:/usr/lib:/opt/lib:/opt/usr/lib
+export PATH LD_LIBRARY_PATH
+
 PROG=/opt/usr/bin/usque
+CONFIG_FILE=/opt/usr/bin/config.json
 ARGS="socks -S -b $LAN_IP -p 8480 -d 1.1.1.1 -d 1.0.0.1 -s ozon.ru"
 DESC="Usque SOCKS5"
-PIDFILE=/var/run/usque.pid
+PIDFILE="/opt/var/run/usque.pid"
+BIND_IP="$LAN_IP"
+# The domain you use in ARGS (needed for DNS check)
+TARGET_DOMAIN="ozon.ru"
 
 # --- Logic ---
 
-if [ "\$ENABLED" != "yes" ]; then
-    echo "\$DESC is disabled."
-    exit 0
-fi
+is_running() {
+  pgrep -f "\$PROG" >/dev/null 2>&1
+}
+
+status_service() {
+  if is_running; then
+    echo "\$DESC is running."
+  else
+    echo "\$DESC is stopped."
+  fi
+}
+
+wait_for_ip() {
+  local RETRIES=30
+  echo "Checking for LAN IP: \$BIND_IP..."
+  while [ \$RETRIES -gt 0 ]; do
+    if ip addr show | grep -q "inet \$BIND_IP"; then
+      echo "LAN IP ready."
+      return 0
+    fi
+    sleep 1
+    RETRIES=\$((RETRIES - 1))
+  done
+  echo "Warning: LAN IP not found."
+  return 0
+}
+
+wait_for_internet() {
+  local RETRIES=30
+  echo "Checking Internet connectivity..."
+  while [ \$RETRIES -gt 0 ]; do
+    if ping -c 1 -W 1 1.1.1.1 >/dev/null 2>&1; then
+      echo "Internet (ICMP) ready."
+      return 0
+    fi
+    sleep 1
+    RETRIES=\$((RETRIES - 1))
+  done
+  echo "Warning: No internet response."
+  return 1
+}
+
+# Wait for DNS resolution (Critical for -s ozon.ru)
+wait_for_dns() {
+  local RETRIES=30
+  echo "Checking DNS resolution for \$TARGET_DOMAIN..."
+  
+  while [ \$RETRIES -gt 0 ]; do
+    # nslookup checks if the router can resolve the domain
+    if nslookup "\$TARGET_DOMAIN" >/dev/null 2>&1; then
+      echo "DNS ready."
+      return 0
+    fi
+    sleep 1
+    RETRIES=\$((RETRIES - 1))
+  done
+  
+  echo "Warning: DNS resolution failed."
+  return 1
+}
 
 start() {
-    echo -n "Starting \$DESC: "
-    if [ -f "\$PIDFILE" ]; then
-        if kill -0 \$(cat "\$PIDFILE") 2>/dev/null; then
-            echo "Already running."
-            return 1
-        fi
-    fi
-    
-    start-stop-daemon -S -b -m -p "\$PIDFILE" -x "\$PROG" -- \$ARGS
-    
+  if is_running; then
+    echo "Cleaning up old processes..."
+    pkill -f "\$PROG"
     sleep 1
-    if [ -f "\$PIDFILE" ]; then
-        echo "done."
-    else
-        echo "failed."
-    fi
+  fi
+
+  # Step 1: Wait for Local Interface
+  wait_for_ip
+  
+  # Step 2: Wait for Config File
+  if [ ! -f "\$CONFIG_FILE" ]; then
+      echo "Error: Config missing."
+      return 1
+  fi
+  
+  # Step 3: Wait for Internet Connection
+  if ! wait_for_internet; then return 1; fi
+  
+  # Step 4: Wait for DNS (Crucial fix for -s domain args)
+  if ! wait_for_dns; then return 1; fi
+
+  # Step 5: Stabilization delay
+  # Even after connectivity is up, routing tables might settle late.
+  echo "Waiting 5 seconds for system stabilization..."
+  sleep 5
+  
+  cd /opt/usr/bin
+
+  echo -n "Starting \$DESC: "
+  
+  \$PROG \$ARGS >> /tmp/usque_startup.log 2>&1 &
+  local NEW_PID=\$!
+  
+  sleep 2
+  
+  if kill -0 "\$NEW_PID" 2>/dev/null; then
+    echo "\$NEW_PID" > "\$PIDFILE"
+    echo "done. (PID \$NEW_PID)"
+    > /tmp/usque_startup.log
+  else
+    echo "failed."
+    cat /tmp/usque_startup.log
+  fi
 }
 
 stop() {
-    echo -n "Stopping \$DESC: "
-    start-stop-daemon -K -p "\$PIDFILE" -x "\$PROG"
-    rm -f "\$PIDFILE"
+  echo -n "Stopping \$DESC: "
+  if is_running; then
+    pkill -f "\$PROG"
     echo "done."
-}
-
-status() {
-    if [ -f "\$PIDFILE" ]; then
-        if kill -0 \$(cat "\$PIDFILE") 2>/dev/null; then
-            echo "\$DESC is running (PID \$(cat \$PIDFILE))."
-            return 0
-        else
-            echo "\$DESC is dead but PID file exists."
-            return 1
-        fi
-    else
-        echo "\$DESC is not running."
-        return 3
-    fi
+  else
+    echo "not running."
+  fi
+  rm -f "\$PIDFILE"
 }
 
 case "\$1" in
-    start) start ;;
-    stop) stop ;;
-    restart) stop; start ;;
-    status) status ;;
-    *) echo "Usage: \$0 {start|stop|restart|status}"; exit 1 ;;
+  start) start ;;
+  stop) stop ;;
+  status) status_service ;;
+  restart) stop; start ;;
+  *) echo "Usage: \$0 {start|stop|restart|status}"; exit 1 ;;
 esac
 EOF
 
