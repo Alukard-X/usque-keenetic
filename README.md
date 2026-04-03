@@ -117,8 +117,8 @@ ARGS="socks -S -b 192.168.1.1 -p 8480 -d 1.1.1.1 -d 1.0.0.1 -s ozon.ru"
 ### Usque
 
 ```bash
-opkg remove usque
-rm /opt/etc/init.d/S99usque
+/opt/etc/init.d/S99usque stop
+rm /opt/usr/bin/usque /opt/usr/bin/config.json /opt/etc/init.d/S99usque
 ```
 
 ### Redsocks (опционально)
