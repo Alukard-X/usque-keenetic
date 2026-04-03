@@ -11,7 +11,6 @@ NC='\033[0m'
 echo "Начинаю установку Usque..."
 
 # 1. Проверка и установка зависимостей
-# УБРАН procps-ng, так как теперь используется встроенный start-stop-daemon
 DEPS="wget-ssl ca-certificates unzip bind-dig"
 NEED_UPDATE=0
 
@@ -121,7 +120,7 @@ fi
 
 echo "Определен IP адрес роутера: $LAN_IP"
 
-# 7. Создание init скрипта (ИСПОЛЬЗУЕТСЯ start-stop-daemon)
+# 7. Создание init скрипта (Адаптировано под BusyBox start-stop-daemon)
 echo "Создание скрипта запуска /opt/etc/init.d/S99usque..."
 cat <<EOF > /opt/etc/init.d/S99usque
 #!/bin/sh
@@ -142,7 +141,6 @@ TARGET_DOMAIN="ozon.ru"
 # --- Logic ---
 
 is_running() {
-  # Безопасная проверка: читаем PID, проверяем что он не пустой и процесс существует
   [ -f "\$PIDFILE" ] && read pid < "\$PIDFILE" && [ -n "\$pid" ] && kill -0 "\$pid" 2>/dev/null
 }
 
@@ -221,18 +219,20 @@ start() {
   echo "Waiting 5 seconds for system stabilization..."
   sleep 5
   
+  # BusyBox start-stop-daemon не поддерживает --chdir, поэтому переходим заранее
+  cd /opt/usr/bin || return 1
+
   echo -n "Starting \$DESC: "
   
-  # Используем start-stop-daemon для надежного запуска в фоне
-  start-stop-daemon --start --quiet \\
-    --pidfile "\$PIDFILE" \\
-    --exec "\$PROG" \\
-    --chdir /opt/usr/bin \\
-    --background \\
-    --make-pidfile \\
-    --stdout /tmp/usque_startup.log \\
-    --stderr /tmp/usque_startup.log \\
-    -- \$ARGS
+  # Синтаксис BusyBox:
+  # -S : --start
+  # -b : --background
+  # -m : --make-pidfile
+  # -p : --pidfile
+  # -x : --exec
+  # Перенаправление вывода делаем стандартными средствами шелла
+  start-stop-daemon -S -q -p "\$PIDFILE" -x "\$PROG" -b -m \
+    >> /tmp/usque_startup.log 2>&1 -- \$ARGS
   
   sleep 2
   
@@ -248,8 +248,21 @@ start() {
 stop() {
   echo -n "Stopping \$DESC: "
   if is_running; then
-    # --retry 5: шлет SIGTERM, ждет до 5 секунд, затем убивает SIGKILL
-    start-stop-daemon --stop --quiet --pidfile "\$PIDFILE" --exec "\$PROG" --retry 5
+    # Синтаксис BusyBox: -K это --stop
+    start-stop-daemon -K -q -p "\$PIDFILE" -x "\$PROG"
+    
+    # Ручная реализация --retry 5 (так как в BusyBox ее нет)
+    local RETRY=5
+    while [ \$RETRY -gt 0 ] && is_running; do
+      sleep 1
+      RETRY=\$((RETRY - 1))
+    done
+    
+    # Если после SIGTERM процесс жив - убиваем жестоко (SIGKILL)
+    if is_running; then
+      start-stop-daemon -K -q -p "\$PIDFILE" -x "\$PROG" -s KILL
+    fi
+    
     echo "done."
   else
     echo "not running."
