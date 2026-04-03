@@ -281,7 +281,19 @@ chmod +x /opt/etc/init.d/S99usque
 
 # 8. Регистрация и запуск
 echo "Выполняю регистрацию (usque register)..."
-echo "y" | /opt/usr/bin/usque register
+# 'yes' держит stdin открытым, пока usque не подключится к серверу и не спросит ввод
+if yes | /opt/usr/bin/usque register; then
+    echo "Регистрация успешна."
+else
+    echo -e "${RED}Ошибка регистрации Usque. Проверьте логи выше.${NC}"
+    exit 1
+fi
+
+# Дополнительная проверка, что конфиг действительно создался
+if [ ! -f "/opt/usr/bin/config.json" ]; then
+    echo -e "${RED}Ошибка: Файл конфигурации /opt/usr/bin/config.json не был создан.${NC}"
+    exit 1
+fi
 
 echo "Запуск сервиса..."
 /opt/etc/init.d/S99usque start
