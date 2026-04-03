@@ -51,7 +51,7 @@
 
 ## 🚀 Быстрая установка
 
-Подключитесь к роутеру по SSH и выполните команду:
+Подключитесь к роутеру по SSH (пример: 192.168.1.1:222 root/keenetic) и выполните команду:
 
 ```bash
 opkg install wget-ssl ca-certificates
@@ -62,6 +62,7 @@ wget -qO- https://raw.githubusercontent.com/Alukard-X/usque-keenetic/refs/heads/
 ```
 
 Если что-то пошло не так и не прошла автоматическая регистрация:
+
 ```bash
 /opt/usr/bin/usque register
 /opt/etc/init.d/S99usque restart
