@@ -127,8 +127,8 @@ cat <<EOF > /opt/etc/init.d/S99usque
 
 # --- Configuration ---
 PATH=/opt/sbin:/opt/bin:/opt/usr/sbin:/opt/usr/bin:/usr/sbin:/usr/bin:/sbin:/bin
-LD_LIBRARY_PATH=/lib:/usr/lib:/opt/lib:/opt/usr/lib
-export PATH LD_LIBRARY_PATH
+# LD_LIBRARY_PATH=/lib:/usr/lib:/opt/lib:/opt/usr/lib
+# export PATH LD_LIBRARY_PATH
 
 PROG=/opt/usr/bin/usque
 CONFIG_FILE=/opt/usr/bin/config.json
