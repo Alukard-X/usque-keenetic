@@ -11,7 +11,8 @@ NC='\033[0m'
 echo "Начинаю установку Usque..."
 
 # 1. Проверка и установка зависимостей
-DEPS="wget-ssl ca-certificates unzip bind-dig"
+# ДОБАВЛЕН curl (нужен для мониторинга прокси)
+DEPS="wget-ssl ca-certificates unzip bind-dig curl"
 NEED_UPDATE=0
 
 echo "Проверка зависимостей..."
@@ -120,7 +121,7 @@ fi
 
 echo "Определен IP адрес роутера: $LAN_IP"
 
-# 7. Создание init скрипта (Адаптировано под BusyBox start-stop-daemon)
+# 7. Создание init скрипта (С ВСТРОЕННЫМ МОНИТОРИНГОМ)
 echo "Создание скрипта запуска /opt/etc/init.d/S99usque..."
 cat <<EOF > /opt/etc/init.d/S99usque
 #!/bin/sh
@@ -135,6 +136,7 @@ CONFIG_FILE=/opt/usr/bin/config.json
 ARGS="socks -S -b $LAN_IP -p 8480 -d 1.1.1.1 -d 1.0.0.1 -s ozon.ru"
 DESC="Usque SOCKS5"
 PIDFILE="/opt/var/run/usque.pid"
+MONITOR_PIDFILE="/opt/var/run/usque_monitor.pid"
 BIND_IP="$LAN_IP"
 TARGET_DOMAIN="ozon.ru"
 REDSOCKS_INIT="/opt/etc/init.d/S23redsocks"
@@ -150,6 +152,11 @@ status_service() {
     echo "\$DESC is running (PID \$(cat \$PIDFILE))."
   else
     echo "\$DESC is stopped."
+  fi
+  if [ -f "\$MONITOR_PIDFILE" ] && kill -0 "\$(cat \$MONITOR_PIDFILE)" 2>/dev/null; then
+    echo "Monitor is running."
+  else
+    echo "Monitor is stopped."
   fi
 }
 
@@ -186,7 +193,6 @@ wait_for_internet() {
 wait_for_dns() {
   local RETRIES=30
   echo "Checking DNS resolution for \$TARGET_DOMAIN..."
-  
   while [ \$RETRIES -gt 0 ]; do
     if nslookup "\$TARGET_DOMAIN" >/dev/null 2>&1; then
       echo "DNS ready."
@@ -195,7 +201,6 @@ wait_for_dns() {
     sleep 1
     RETRIES=\$((RETRIES - 1))
   done
-  
   echo "Warning: DNS resolution failed."
   return 1
 }
@@ -232,6 +237,7 @@ start() {
   if is_running; then
     echo "done. (PID \$(cat \$PIDFILE))"
     > /tmp/usque_startup.log
+    start_monitor
   else
     echo "failed."
     cat /tmp/usque_startup.log
@@ -239,6 +245,7 @@ start() {
 }
 
 stop() {
+  stop_monitor
   echo -n "Stopping \$DESC: "
   if is_running; then
     start-stop-daemon -K -q -p "\$PIDFILE" -x "\$PROG"
@@ -260,6 +267,47 @@ stop() {
   rm -f "\$PIDFILE"
 }
 
+# --- Логика Мониторинга ---
+start_monitor() {
+  if [ -f "\$MONITOR_PIDFILE" ] && kill -0 "\$(cat \$MONITOR_PIDFILE)" 2>/dev/null; then
+    return # Монитор уже запущен
+  fi
+  
+  echo "Starting background proxy monitor..."
+  (
+    while true; do
+      sleep 60 # Проверяем каждую минуту
+      
+      # Проверяем интернет ЧЕРЕЗ прокси. 
+      # socks5h:// означает, что DNS тоже резолвится через прокси (важно для обхода!)
+      HTTP_CODE=\$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 -x socks5h://\$BIND_IP:8480 https://cp.cloudflare.com/generate_204 2>/dev/null)
+      
+      if [ "\$HTTP_CODE" != "204" ]; then
+        echo "\$(date '+%Y-%m-%d %H:%M:%S') [Monitor] Proxy check failed (HTTP: \$HTTP_CODE). Restarting..." >> /tmp/usque_monitor.log
+        
+        # Останавливаем и запускаем основную службу (монитор при этом сам не убьется, т.к. он в subshell)
+        stop
+        sleep 3
+        start
+      fi
+    done
+  ) &
+  
+  echo \$! > "\$MONITOR_PIDFILE"
+}
+
+stop_monitor() {
+  if [ -f "\$MONITOR_PIDFILE" ]; then
+    local mpid=\$(cat \$MONITOR_PIDFILE)
+    if [ -n "\$mpid" ] && kill -0 "\$mpid" 2>/dev/null; then
+      echo -n "Stopping proxy monitor: "
+      kill "\$mpid" 2>/dev/null
+      echo "done."
+    fi
+    rm -f "\$MONITOR_PIDFILE"
+  fi
+}
+
 case "\$1" in
   start) start ;;
   stop) stop ;;
@@ -267,7 +315,6 @@ case "\$1" in
   restart)
     stop
     start
-    # Перезапускаем redsocks, если он установлен, чтобы он подхватил новый SOCKS5 прокси
     if [ -x "\$REDSOCKS_INIT" ]; then
       echo "Detected Redsocks, restarting to apply new proxy..."
       "\$REDSOCKS_INIT" restart
@@ -281,14 +328,12 @@ chmod +x /opt/etc/init.d/S99usque
 
 # 8. Регистрация и запуск
 echo "Выполняю регистрацию (usque register)..."
-# 'yes' держит stdin открытым, пока usque не подключится к серверу и не спросит ввод
 if yes | /opt/usr/bin/usque register; then
     echo "Регистрация успешна."
 else
     echo -e "${RED}Ошибка при регистрации. Проверяю конфигурацию...${NC}"
 fi
 
-# Дополнительная проверка, что конфиг на месте
 if [ ! -f "/opt/usr/bin/config.json" ]; then
     echo "Файл /opt/usr/bin/config.json не найден. Проверяю наличие резервной копии..."
     if [ -f "/opt/root/config.json" ]; then
