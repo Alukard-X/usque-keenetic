@@ -68,7 +68,7 @@ wget -qO- https://raw.githubusercontent.com/Alukard-X/usque-keenetic/refs/heads/
 /opt/etc/init.d/S99usque restart
 ```
 
-После основной установки можно дополнительно настроить проксирование через **redsocks**:
+После основной установки можно дополнительно настроить маршрутизацию основных IP TG через **redsocks**:
 
 ```bash
 wget -qO- https://raw.githubusercontent.com/Alukard-X/usque-keenetic/refs/heads/main/setup_redsocks.sh | sh
@@ -164,6 +164,7 @@ reboot
 | `x86_64` | x86 |
 
 ---
+## Настройка маршрутизации
 <details>
 <summary>Картинки</summary>
 <img width="268" height="113" alt="image" src="https://github.com/user-attachments/assets/8afb2afb-4a84-48f9-9c1e-b64cffadc079" />
