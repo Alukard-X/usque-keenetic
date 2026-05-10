@@ -164,6 +164,14 @@ reboot
 | `x86_64` | x86 |
 
 ---
+<img width="268" height="113" alt="image" src="https://github.com/user-attachments/assets/8afb2afb-4a84-48f9-9c1e-b64cffadc079" />
+<img width="559" height="193" alt="image" src="https://github.com/user-attachments/assets/52d0ed67-9b35-42b6-ba23-6b24728704b6" />
+<img width="278" height="429" alt="image" src="https://github.com/user-attachments/assets/b9fd81bb-f6e1-4d18-bf7d-c6287891c55d" />
+<img width="510" height="397" alt="image" src="https://github.com/user-attachments/assets/18173d32-cfcb-45d8-ad2e-599e0c0d51d5" />
+<img width="460" height="311" alt="image" src="https://github.com/user-attachments/assets/5059156b-a379-485d-b650-633adeae2a29" />
+
+
+
 
 ## 🙏 Благодарности
 
