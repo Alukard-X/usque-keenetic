@@ -39,7 +39,6 @@ trap 'rm -rf "$LOCKDIR"' EXIT
 CHAIN="REDSOCKS_TG"
 REDSOCKS_PORT=12345
 PIDFILE="/opt/var/run/redsocks.pid"
-# Флаг -w 3 решает проблему "Resource temporarily unavailable" на уровне самого iptables
 IPT="iptables -t nat"
 
 # Обновленный список подсетей Telegram (IPv4)
