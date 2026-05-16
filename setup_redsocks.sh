@@ -24,32 +24,62 @@ echo "Создание скрипта /opt/etc/ndm/netfilter.d/010-proxy.sh..."
 cat << 'EOFSCRIPT' > /opt/etc/ndm/netfilter.d/010-proxy.sh
 #!/bin/sh
 
-# 1. Проверяем, что redsocks запущен (ищем по вашему init-файлу)
+# 1. Работаем только с таблицей nat
+[ "$table" != "nat" ] && exit 0
+
+# 2. Защита от параллельного запуска через mkdir (не требует установки flock)
+LOCKDIR="/tmp/redsocks_tg.lock"
+if ! mkdir "$LOCKDIR" 2>/dev/null; then
+    exit 0
+fi
+# Автоудаление блокировки при любом завершении скрипта
+trap 'rm -rf "$LOCKDIR"' EXIT
+
+# 3. Переменные
+CHAIN="REDSOCKS_TG"
+REDSOCKS_PORT=12345
 PIDFILE="/opt/var/run/redsocks.pid"
-if [ ! -f "$PIDFILE" ] || ! kill -0 $(cat "$PIDFILE") 2>/dev/null; then
+# Флаг -w 3 решает проблему "Resource temporarily unavailable" на уровне самого iptables
+IPT="iptables -w 3 -t nat"
+
+# Обновленный список подсетей Telegram (IPv4)
+TG_IPS="91.108.4.0/22 91.108.8.0/22 91.108.12.0/22 91.108.16.0/22 91.108.20.0/22 91.108.56.0/22 95.161.64.0/20 149.154.160.0/21 149.154.168.0/22 149.154.172.0/22 91.105.192.0/23 185.76.151.0/24"
+
+# 4. Функция полной очистки правил
+clean_rules() {
+    $IPT -D PREROUTING -p tcp -j "$CHAIN" 2>/dev/null
+    $IPT -F "$CHAIN" 2>/dev/null
+    $IPT -X "$CHAIN" 2>/dev/null
+}
+
+# 5. Проверяем, запущен ли redsocks
+if [ ! -f "$PIDFILE" ] || ! kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+    # Если НЕ запущен — обязательно удаляем правила, чтобы не сломать интернет
+    clean_rules
     exit 0
 fi
 
-# 2. Работаем только с таблицей nat
-[ "$table" != "nat" ] && exit 0
+# 6. Настройка цепочки iptables
+# Создаем цепочку (2>/dev/null подавляет ошибку, если цепочка уже существует)
+ $IPT -N "$CHAIN" 2>/dev/null
 
-# 3. Настройка цепочки
-iptables -t nat -N REDSOCKS_TG 2>/dev/null
-iptables -t nat -F REDSOCKS_TG
+# Очищаем от старых правил внутри цепочки, чтобы не было дублей
+ $IPT -F "$CHAIN"
 
-# Исключаем локальную сеть и сам адрес роутера
-iptables -t nat -A REDSOCKS_TG -d 192.168.0.0/16 -j RETURN
-iptables -t nat -A REDSOCKS_TG -d 127.0.0.1 -j RETURN
+# Исключаем локальные сети (чтобы не возникало петель) и сам роутер
+ $IPT -A "$CHAIN" -d 10.0.0.0/8 -j RETURN
+ $IPT -A "$CHAIN" -d 172.16.0.0/12 -j RETURN
+ $IPT -A "$CHAIN" -d 192.168.0.0/16 -j RETURN
+ $IPT -A "$CHAIN" -d 127.0.0.1 -j RETURN
 
-# Направляем трафик Telegram на порт REDSOCKS (12345)
-# Диапазоны Telegram:
-for ip in 91.108.56.0/22 91.108.4.0/22 91.108.8.0/22 91.108.16.0/22 91.108.12.0/22 149.154.160.0/20 91.105.192.0/23 91.108.20.0/22 185.76.151.0/24; do
-    iptables -t nat -A REDSOCKS_TG -d $ip -p tcp -j REDIRECT --to-ports 12345
+# Перенаправляем трафик Telegram на порт REDSOCKS
+for ip in $TG_IPS; do
+    $IPT -A "$CHAIN" -d $ip -p tcp -j REDIRECT --to-ports "$REDSOCKS_PORT"
 done
 
-# 4. Пробрасываем цепочку в основной поток (если еще не добавлена)
-iptables -t nat -C PREROUTING -p tcp -j REDSOCKS_TG 2>/dev/null || \
-iptables -t nat -A PREROUTING -p tcp -j REDSOCKS_TG
+# 7. Встраиваем цепочку в основной поток (если еще не встроена)
+ $IPT -C PREROUTING -p tcp -j "$CHAIN" 2>/dev/null || \
+ $IPT -A PREROUTING -p tcp -j "$CHAIN"
 EOFSCRIPT
 
 chmod +x /opt/etc/ndm/netfilter.d/010-proxy.sh
@@ -168,17 +198,17 @@ dnstc {
 // you can add more `redsocks' and `redudp' sections if you need.
 EOFCONF
 
-# Заменяем плейсхолдер на реальный IP
+# 6. Заменяем плейсхолдер на реальный IP
 sed -i "s/PLACEHOLDER_IP/$LAN_IP/g" /opt/etc/redsocks.conf
 
-# 6. Перезапуск redsocks для применения конфига
+# 7. Перезапуск redsocks для применения конфига
 echo "Перезапуск службы redsocks..."
 /opt/etc/init.d/S23redsocks restart 2>/dev/null || /opt/etc/init.d/S23redsocks start
 
 # Небольшая пауза, чтобы сервис успел стартануть и создать PID-файл
 sleep 2
 
-# 7. Применение правил iptables
+# 8. Применение правил iptables
 echo "Применение правил iptables..."
 export table=nat && /opt/etc/ndm/netfilter.d/010-proxy.sh
 
