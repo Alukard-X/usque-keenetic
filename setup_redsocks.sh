@@ -40,7 +40,7 @@ CHAIN="REDSOCKS_TG"
 REDSOCKS_PORT=12345
 PIDFILE="/opt/var/run/redsocks.pid"
 # Флаг -w 3 решает проблему "Resource temporarily unavailable" на уровне самого iptables
-IPT="iptables -w 3 -t nat"
+IPT="iptables -t nat"
 
 # Обновленный список подсетей Telegram (IPv4)
 TG_IPS="91.108.4.0/22 91.108.8.0/22 91.108.12.0/22 91.108.16.0/22 91.108.20.0/22 91.108.56.0/22 95.161.64.0/20 149.154.160.0/21 149.154.168.0/22 149.154.172.0/22 91.105.192.0/23 185.76.151.0/24"
