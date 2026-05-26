@@ -282,7 +282,7 @@ stop() {
   rm -f "\$PIDFILE"
 }
 
-# --- Логика Мониторинга (без nohup) ---
+# --- Логика Мониторинга ---
 start_monitor() {
   if [ -f "\$MONITOR_PIDFILE" ] && kill -0 "\$(cat \$MONITOR_PIDFILE)" 2>/dev/null; then
     return
@@ -296,7 +296,8 @@ start_monitor() {
       HTTP_CODE=\$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 -x socks5h://\$BIND_IP:8480 https://cp.cloudflare.com/generate_204 2>/dev/null)
       
       if [ "\$HTTP_CODE" != "204" ]; then
-        printf "\$(date '+%%Y-%%m-%%d %%H:%%M:%%S') [Monitor] Proxy check failed (HTTP: %%s). Restarting...\n" "\$HTTP_CODE" >> /tmp/usque_monitor.log
+        # ИСПРАВЛЕНО: %%s заменено на %s, а %%Y и прочее - на %Y, чтобы выводился реальный код, а не буквы
+        printf "\$(date '+%Y-%m-%d %H:%M:%S') [Monitor] Proxy check failed (HTTP: %s). Restarting...\n" "\$HTTP_CODE" >> /tmp/usque_monitor.log
         
         /opt/etc/init.d/S99usque restart >> /tmp/usque_monitor.log 2>&1 &
         exit 0 
@@ -331,7 +332,8 @@ case "\$1" in
       "\$REDSOCKS_INIT" restart
     fi
     ;;
-  *) printf "Usage: %%s {start|stop|restart|status}\n" "\$0"; exit 1 ;;
+  # ИСПРАВЛЕНО: %%s заменено на %s
+  *) printf "Usage: %s {start|stop|restart|status}\n" "\$0"; exit 1 ;;
 esac
 EOF
 
@@ -355,7 +357,6 @@ if [ -f "/opt/etc/usque/config.json" ]; then
     printf "Конфигурационный файл уже существует. Регистрация пропускается.\n"
 else
     printf "Выполняю регистрацию (usque register)...\n"
-    # Используем утилиту yes, которая автоматически отвечает 'y' на любые вопросы программы
     yes | /opt/usr/bin/usque register -c /opt/etc/usque/config.json
     
     if [ $? -ne 0 ]; then
