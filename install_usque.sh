@@ -10,6 +10,45 @@ NC='\033[0m'
 
 printf "Начинаю установку Usque...\n"
 
+# 0. Предварительная проверка и остановка сервиса (если он запущен)
+USQUE_PIDFILE="/opt/var/run/usque.pid"
+MONITOR_PIDFILE="/opt/var/run/usque_monitor.pid"
+INIT_SCRIPT="/opt/etc/init.d/S99usque"
+
+if [ -f "$USQUE_PIDFILE" ]; then
+    OLD_PID=$(cat "$USQUE_PIDFILE" 2>/dev/null)
+    if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then
+        printf "Обнаружен запущенный сервис Usque (PID %s). Останавливаю перед обновлением...\n" "$OLD_PID"
+        if [ -x "$INIT_SCRIPT" ]; then
+            "$INIT_SCRIPT" stop > /dev/null 2>&1
+        else
+            kill "$OLD_PID" 2>/dev/null
+        fi
+        
+        sleep 2
+        
+        # Если процесс не завершился штатно, убиваем принудительно
+        if kill -0 "$OLD_PID" 2>/dev/null; then
+            printf "Принудительное завершение процесса %s...\n" "$OLD_PID"
+            kill -9 "$OLD_PID" 2>/dev/null
+        fi
+        
+        # Останавливаем монитор, если он остался висеть
+        if [ -f "$MONITOR_PIDFILE" ]; then
+            M_PID=$(cat "$MONITOR_PIDFILE" 2>/dev/null)
+            if [ -n "$M_PID" ] && kill -0 "$M_PID" 2>/dev/null; then
+                kill -9 "$M_PID" 2>/dev/null
+            fi
+            rm -f "$MONITOR_PIDFILE"
+        fi
+        
+        rm -f "$USQUE_PIDFILE"
+        printf "Старая версия сервиса успешно остановлена.\n"
+    else
+        rm -f "$USQUE_PIDFILE"
+    fi
+fi
+
 # 1. Проверка и установка зависимостей
 DEPS="wget-ssl ca-certificates unzip bind-dig curl"
 NEED_UPDATE=0
