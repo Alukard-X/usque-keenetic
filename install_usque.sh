@@ -93,7 +93,15 @@ printf "Архитектура Entware: %s\n" "$OPKG_ARCH"
 
 case "$OPKG_ARCH" in
     mipsel*) FILE_ARCH="mipsle" ;;
-    mips*)   FILE_ARCH="mips" ;;
+    mips*)
+        ENDIAN=$(get_endian)
+        printf "Определена Endianness процессора: %s\n" "$ENDIAN"
+        if [ "$ENDIAN" = "01" ]; then
+            FILE_ARCH="mipsle"
+        else
+            FILE_ARCH="mips"
+        fi
+        ;;
     aarch64*) FILE_ARCH="arm64" ;;
     arm*)    FILE_ARCH="armv7" ;;
     x86_64*) FILE_ARCH="amd64" ;;
