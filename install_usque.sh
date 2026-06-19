@@ -81,8 +81,8 @@ export HTTPLIB_CA_CERTS=/opt/etc/ssl/certs/ca-certificates.crt
 # 2. Определение архитектуры
 
 get_endian() {
-    if [ -x /bin/busybox ]; then
-        od -An -tx1 -N5 /bin/busybox | tr -d ' \n' | cut -c9-10
+    if [ -x /opt/usr/bin/busybox ]; then
+        dd if=/opt/usr/bin/busybox bs=1 count=6 2>/dev/null | od -b | awk 'NR==1 {print $7}'
     else
         echo "unknown"
     fi
@@ -96,7 +96,7 @@ case "$OPKG_ARCH" in
     mips*)
         ENDIAN=$(get_endian)
         printf "Определена Endianness процессора: %s\n" "$ENDIAN"
-        if [ "$ENDIAN" = "01" ]; then
+        if [ "$ENDIAN" = "001" ]; then
             FILE_ARCH="mipsle"
         else
             FILE_ARCH="mips"
@@ -116,7 +116,7 @@ case "$OPKG_ARCH" in
             mips)
                 ENDIAN=$(get_endian)
                 printf "Определена Endianness процессора: %s\n" "$ENDIAN"
-                if [ "$ENDIAN" = "01" ]; then
+                if [ "$ENDIAN" = "001" ]; then
                     FILE_ARCH="mipsle"
                 else
                     FILE_ARCH="mips"
